@@ -1,0 +1,8 @@
+services:
+  sitl:
+    build: ./sitl
+    image: allswell/ardupilot-sitl:copter-4.5.7
+    ports:
+      - "5760:5760"   # primary MAVLink TCP — connect your code here
+      - "5762:5762"   # spare (e.g. attach a GCS like QGroundControl at the same time)
+    restart: unless-stopped
