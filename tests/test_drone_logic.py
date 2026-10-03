@@ -1,0 +1,249 @@
+"""Unit tests for Drone logic using a mock MAVLink connection (no SITL required)."""
+
+from __future__ import annotations
+
+import queue
+import time
+from dataclasses import FrozenInstanceError
+from typing import Any
+import pytest
+from pymavlink import mavutil
+
+from starter.drone import Drone, DroneError, MissionAborted
+
+
+class MockMsg:
+    """Generic mock message simulating pymavlink message objects."""
+
+    def __init__(self, mtype: str, **kwargs: Any) -> None:
+        self._type = mtype
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def get_type(self) -> str:
+        return self._type
+
+    def get_srcSystem(self) -> int:
+        return getattr(self, "_src_sys", 1)
+
+    def get_srcComponent(self) -> int:
+        return getattr(self, "_src_comp", 1)
+
+
+class MockMav:
+    def __init__(self) -> None:
+        self.sent_commands: list[dict[str, Any]] = []
+        self.sent_params: list[dict[str, Any]] = []
+        self.sent_positions: list[dict[str, Any]] = []
+
+    def request_data_stream_send(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def command_long_send(
+        self,
+        target_system: int,
+        target_component: int,
+        command: int,
+        confirmation: int,
+        p1: float,
+        p2: float,
+        p3: float,
+        p4: float,
+        p5: float,
+        p6: float,
+        p7: float,
+    ) -> None:
+        self.sent_commands.append(
+            {
+                "command": command,
+                "confirmation": confirmation,
+                "params": [p1, p2, p3, p4, p5, p6, p7],
+            }
+        )
+
+    def param_set_send(
+        self,
+        target_system: int,
+        target_component: int,
+        param_id: bytes,
+        param_value: float,
+        param_type: int,
+    ) -> None:
+        self.sent_params.append({"param_id": param_id, "param_value": param_value})
+
+    def set_position_target_global_int_send(self, *args: Any, **kwargs: Any) -> None:
+        self.sent_positions.append({"args": args, "kwargs": kwargs})
+
+    def heartbeat_send(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+class MockConnection:
+    """Mock pymavlink connection object fed by an in-memory queue."""
+
+    def __init__(self) -> None:
+        self.target_system = 1
+        self.target_component = 1
+        self.mav = MockMav()
+        self.rx_queue: queue.Queue[Any] = queue.Queue()
+        self.closed = False
+
+    def wait_heartbeat(self, timeout: float = 1.0) -> MockMsg:
+        return MockMsg(
+            "HEARTBEAT",
+            type=mavutil.mavlink.MAV_TYPE_QUADROTOR,
+            autopilot=mavutil.mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA,
+            base_mode=0,
+            custom_mode=0,
+            _src_sys=1,
+            _src_comp=1,
+        )
+
+    def mode_mapping(self) -> dict[str, int]:
+        return {"STABILIZE": 0, "GUIDED": 4, "RTL": 6}
+
+    def recv_match(self, blocking: bool = True, timeout: float = 0.5) -> Any:
+        if self.closed:
+            return None
+        try:
+            return self.rx_queue.get(block=blocking, timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def mock_drone() -> tuple[Drone, MockConnection]:
+    conn = MockConnection()
+    drone = Drone(conn=conn, enable_gcs_heartbeat=False)
+    yield drone, conn
+    drone.close()
+
+
+def test_command_ack_accepted(mock_drone: tuple[Drone, MockConnection]) -> None:
+    drone, conn = mock_drone
+
+    # Enqueue accepted ACK
+    ack = MockMsg(
+        "COMMAND_ACK",
+        command=mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+        result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+    )
+    conn.rx_queue.put(ack)
+
+    # Should succeed without error
+    drone.send_command_long(mavutil.mavlink.MAV_CMD_DO_SET_MODE, timeout=1.0)
+    assert len(conn.mav.sent_commands) == 1
+    assert conn.mav.sent_commands[0]["command"] == mavutil.mavlink.MAV_CMD_DO_SET_MODE
+
+
+def test_command_ack_rejected(mock_drone: tuple[Drone, MockConnection]) -> None:
+    drone, conn = mock_drone
+
+    # Enqueue rejected ACK
+    ack = MockMsg(
+        "COMMAND_ACK",
+        command=mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+        result=mavutil.mavlink.MAV_RESULT_TEMPORARILY_REJECTED,
+    )
+    conn.rx_queue.put(ack)
+
+    with pytest.raises(DroneError, match="MAV_RESULT_TEMPORARILY_REJECTED"):
+        drone.send_command_long(mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, timeout=1.0)
+
+
+def test_command_ack_in_progress_then_accepted(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+
+    # Enqueue IN_PROGRESS followed by ACCEPTED
+    ack1 = MockMsg(
+        "COMMAND_ACK",
+        command=mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+        result=mavutil.mavlink.MAV_RESULT_IN_PROGRESS,
+    )
+    ack2 = MockMsg(
+        "COMMAND_ACK",
+        command=mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+        result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+    )
+    conn.rx_queue.put(ack1)
+    conn.rx_queue.put(ack2)
+
+    drone.send_command_long(mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, timeout=2.0)
+    assert len(conn.mav.sent_commands) == 1
+
+
+def test_command_ack_timeout_with_retries(mock_drone: tuple[Drone, MockConnection]) -> None:
+    drone, conn = mock_drone
+
+    # Send command with no ACK in queue
+    with pytest.raises(DroneError, match="timed out"):
+        drone.send_command_long(mavutil.mavlink.MAV_CMD_DO_SET_MODE, timeout=0.2, retries=1)
+
+    # Should have sent initial attempt (0) + 1 retry (1)
+    assert len(conn.mav.sent_commands) == 2
+    assert conn.mav.sent_commands[0]["confirmation"] == 0
+    assert conn.mav.sent_commands[1]["confirmation"] == 1
+
+
+def test_param_set_and_confirm(mock_drone: tuple[Drone, MockConnection]) -> None:
+    drone, conn = mock_drone
+
+    # Enqueue PARAM_VALUE response
+    pv = MockMsg(
+        "PARAM_VALUE",
+        param_id=b"SIM_BATT_VOLTAGE\x00\x00",
+        param_value=10.5,
+    )
+    conn.rx_queue.put(pv)
+
+    val = drone.set_param("SIM_BATT_VOLTAGE", 10.5, timeout=1.0)
+    assert val == 10.5
+    assert len(conn.mav.sent_params) == 1
+    assert conn.mav.sent_params[0]["param_id"] == b"SIM_BATT_VOLTAGE"
+
+
+def test_telemetry_snapshot_updates_and_immutable(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+
+    # Push telemetry updates
+    pos = MockMsg(
+        "GLOBAL_POSITION_INT",
+        lat=-353632610,
+        lon=1491652300,
+        relative_alt=15000,
+        alt=599000,
+    )
+    sys_status = MockMsg("SYS_STATUS", voltage_battery=12600)
+    conn.rx_queue.put(pos)
+    conn.rx_queue.put(sys_status)
+
+    time.sleep(0.1)  # Allow RX thread to process
+
+    snap = drone.telemetry
+    assert snap.lat == pytest.approx(-35.363261)
+    assert snap.lon == pytest.approx(149.165230)
+    assert snap.relative_alt == pytest.approx(15.0)
+    assert snap.voltage_battery == pytest.approx(12.6)
+
+    # Snapshot must be frozen/immutable
+    with pytest.raises(FrozenInstanceError):
+        snap.relative_alt = 20.0  # type: ignore
+
+
+def test_abort_event_suppresses_goto(mock_drone: tuple[Drone, MockConnection]) -> None:
+    drone, conn = mock_drone
+
+    # Setting abort_event immediately causes goto to raise MissionAborted (Rule B-3)
+    drone.abort_event.set()
+    with pytest.raises(MissionAborted, match="goto suppressed"):
+        drone.goto(-35.363, 149.165, 15.0)
+
+    # Verify no position command was sent to MAVLink
+    assert len(conn.mav.sent_positions) == 0

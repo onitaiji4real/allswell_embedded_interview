@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -59,10 +60,14 @@ class Drone:
 
     def __init__(
         self,
-        connection_string: str = "tcp:127.0.0.1:5760",
+        connection_string: str = "",
         heartbeat_timeout: float = 30.0,
         log: logging.Logger | None = None,
+        conn: Any | None = None,
+        enable_gcs_heartbeat: bool = False,
     ) -> None:
+        if not connection_string:
+            connection_string = os.getenv("MAVLINK_CONNECTION", "tcp:127.0.0.1:5760")
         self.log = log or logger
         self.connection_string = connection_string
 
@@ -106,10 +111,17 @@ class Drone:
         self._link_broken = False
         self._last_hb_time = 0.0
 
-        # Establish connection
-        self.log.info("Connecting to %s ...", connection_string)
+        # Establish connection or use injected mock
+        if conn is not None:
+            self.conn = conn
+        else:
+            self.log.info("Connecting to %s ...", connection_string)
+            try:
+                self.conn = mavutil.mavlink_connection(connection_string)
+            except Exception as e:
+                raise DroneError(f"Failed to connect to {connection_string}: {e}") from None
+
         try:
-            self.conn = mavutil.mavlink_connection(connection_string)
             hb = self.conn.wait_heartbeat(timeout=heartbeat_timeout)
             if hb is None:
                 raise DroneError(f"No heartbeat received within {heartbeat_timeout}s — is SITL running?")
@@ -143,6 +155,30 @@ class Drone:
         self._rx_thread = threading.Thread(target=self._rx_loop, name="Drone-RX", daemon=True)
         self._rx_thread.start()
 
+        # Optional 1 Hz GCS heartbeat thread
+        self._gcs_hb_thread: threading.Thread | None = None
+        if enable_gcs_heartbeat:
+            self._gcs_hb_thread = threading.Thread(
+                target=self._gcs_heartbeat_loop, name="Drone-GCS-HB", daemon=True
+            )
+            self._gcs_hb_thread.start()
+
+    def _gcs_heartbeat_loop(self) -> None:
+        """Periodic 1 Hz GCS heartbeat sender."""
+        while not self._stop_event.is_set():
+            try:
+                with self._send_lock:
+                    self.conn.mav.heartbeat_send(
+                        mavutil.mavlink.MAV_TYPE_GCS,
+                        mavutil.mavlink.MAV_AUTOPILOT_INVALID,
+                        0,
+                        0,
+                        0,
+                    )
+            except Exception as e:
+                self.log.debug("GCS heartbeat failed: %s", e)
+            self._stop_event.wait(1.0)
+
     @property
     def telemetry(self) -> TelemetrySnapshot:
         """Return an immutable snapshot of the current telemetry."""
@@ -158,8 +194,10 @@ class Drone:
             self._listeners.append(callback)
 
     def close(self) -> None:
-        """Close connection and terminate receiver thread."""
+        """Close connection and terminate background threads."""
         self._stop_event.set()
+        if hasattr(self, "_gcs_hb_thread") and self._gcs_hb_thread and self._gcs_hb_thread.is_alive():
+            self._gcs_hb_thread.join(timeout=1.0)
         if hasattr(self, "_rx_thread") and self._rx_thread.is_alive():
             self._rx_thread.join(timeout=1.0)
         if hasattr(self, "conn"):
@@ -310,9 +348,11 @@ class Drone:
 
                 deadline = time.time() + timeout
                 while time.time() < deadline:
-                    remaining = max(0.05, deadline - time.time())
-                    if not waiter_ev.wait(remaining):
-                        break  # timed out on this wait
+                    if not waiter_holder:
+                        remaining = max(0.05, deadline - time.time())
+                        if not waiter_ev.wait(remaining):
+                            break  # timed out on this wait
+                        waiter_ev.clear()
 
                     if not waiter_holder:
                         continue
@@ -320,7 +360,6 @@ class Drone:
 
                     if ack.result == mavutil.mavlink.MAV_RESULT_IN_PROGRESS:
                         self.log.debug("Command %s IN_PROGRESS, waiting...", cmd_name)
-                        waiter_ev.clear()
                         continue
 
                     if ack.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
