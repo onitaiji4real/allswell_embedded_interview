@@ -84,16 +84,14 @@ def main() -> int:
 
                     # 2. Fence Breach Enforcement (100% boundary)
                     elif dist >= fence_radius:
-                        if not drone.abort_event.is_set():
-                            drone.abort_event.set()
+                        if drone.abort_and_request_mode_nowait("RTL"):
                             state["breached"] = True
                             logger.critical(
                                 "GEOFENCE BREACH: Distance %.1f m >= %.1f m fence limit! Suppressing goto, requesting emergency RTL",
                                 dist,
                                 fence_radius,
                             )
-                            # Rule A: Send non-blocking command from RX thread
-                            drone.request_mode_nowait("RTL")
+                            # The abort flag and RTL request share goto's send lock.
 
             drone.add_listener(geofence_listener)
 
