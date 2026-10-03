@@ -17,6 +17,7 @@
 | 4 | [03_architecture.md](03_architecture.md) | 建議的程式架構、檔案結構、並行設計 |
 | 5 | [04_mavlink_reference.md](04_mavlink_reference.md) | MAVLink 訊息/指令速查與已知陷阱 |
 | 6 | [05_task_plan.md](05_task_plan.md) | 分階段執行計畫與勾選清單 |
+| 7 | [06_manual_testing.md](06_manual_testing.md) | macOS 手動測試指令、預期結果與 QGroundControl 重新連線步驟 |
 
 ## 專案現況（2026-10-04 審查、修正與驗證後）
 
