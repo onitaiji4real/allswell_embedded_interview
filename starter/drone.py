@@ -91,6 +91,22 @@ class Drone:
         """Send position target to autopilot (delegated to link)."""
         self.link.goto(lat, lon, alt_m)
 
+    def get_home_position(self, timeout: float = 10.0) -> tuple[float, float]:
+        """Request the autopilot's Home and wait for a fresh HOME_POSITION."""
+        requested_at = time.time()
+        self.send_command_long(
+            mavutil.mavlink.MAV_CMD_GET_HOME_POSITION,
+            timeout=timeout / 2.0,
+            retries=0,
+        )
+        self.wait_until(
+            lambda snap: snap.last_home_time >= requested_at,
+            timeout=timeout / 2.0,
+            desc="HOME_POSITION response",
+        )
+        snap = self.telemetry
+        return snap.home_lat, snap.home_lon
+
     def close(self) -> None:
         """Close connection and terminate transport threads."""
         self.link.close()

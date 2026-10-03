@@ -52,6 +52,9 @@ class TelemetrySnapshot:
     landed_state: int = 0
     last_position_time: float = 0.0
     last_heartbeat_time: float = 0.0
+    home_lat: float = 0.0  # degrees, from HOME_POSITION
+    home_lon: float = 0.0  # degrees, from HOME_POSITION
+    last_home_time: float = 0.0
     last_statustext: str = ""
 
 
@@ -92,6 +95,9 @@ class MavlinkLink:
             "landed_state": 0,
             "last_position_time": 0.0,
             "last_heartbeat_time": 0.0,
+            "home_lat": 0.0,
+            "home_lon": 0.0,
+            "last_home_time": 0.0,
             "last_statustext": "",
         }
 
@@ -288,6 +294,11 @@ class MavlinkLink:
                     self._state["relative_alt"] = getattr(msg, "relative_alt", 0.0) / 1000.0
                     self._state["alt"] = getattr(msg, "alt", 0.0) / 1000.0
                     self._state["last_position_time"] = now
+
+                elif mtype == "HOME_POSITION":
+                    self._state["home_lat"] = msg.latitude / 1e7
+                    self._state["home_lon"] = msg.longitude / 1e7
+                    self._state["last_home_time"] = now
 
                 elif mtype == "SYS_STATUS":
                     v_raw = getattr(msg, "voltage_battery", 0xFFFF)

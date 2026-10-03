@@ -14,7 +14,7 @@ from typing import Any
 
 from starter.drone import Drone, DroneError, MissionAborted
 from starter.geo import horizontal_distance_m, offset_latlon
-from starter.mission import takeoff_sequence
+from starter.mission import flight_guard, takeoff_sequence
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,10 +51,8 @@ def main() -> int:
     fence_radius = args.radius
     warn_radius = fence_radius * args.warn_ratio
 
-    drone_inst: Drone | None = None
     try:
-        with Drone(connection_string=args.connect, log=logger) as drone:
-            drone_inst = drone
+        with Drone(connection_string=args.connect, log=logger) as drone, flight_guard(drone):
             home_pos: dict[str, float] = {}
             monitor_active = False
             state: dict[str, Any] = {"warned": False, "breached": False}
@@ -100,10 +98,8 @@ def main() -> int:
             # ------------------------------------------------------------------
             takeoff_sequence(drone, altitude_m=15.0)
 
-            # Record Home coordinate after takeoff
-            snap = drone.telemetry
-            home_pos["lat"] = snap.lat
-            home_pos["lon"] = snap.lon
+            # Use the autopilot's actual Home, which may differ from the takeoff position.
+            home_pos["lat"], home_pos["lon"] = drone.get_home_position()
             logger.info(
                 "Geofence initialized: Center=(%.6f, %.6f), Radius=%.1f m, Warning=%.1f m",
                 home_pos["lat"],
@@ -152,12 +148,10 @@ def main() -> int:
 
             # If the drone reached the outbound target without triggering a breach, test failed
             if outbound_completed:
-                logger.error("ERROR: Drone reached outbound target without geofence breach triggering")
-                return 1
+                raise DroneError("Drone reached outbound target without geofence breach triggering")
 
             if not state["breached"]:
-                logger.error("ERROR: Abort occurred but geofence breach was not recorded")
-                return 1
+                raise DroneError("Abort occurred but geofence breach was not recorded")
 
             # ------------------------------------------------------------------
             # 3. Confirm RTL & Wait for Landing and Disarm (abortable=False)
@@ -177,14 +171,6 @@ def main() -> int:
         return 1
     except KeyboardInterrupt:
         logger.error("Interrupted by user (Ctrl+C)")
-        if drone_inst is not None:
-            try:
-                snap = drone_inst.telemetry
-                if snap.armed and snap.relative_alt > 1.0:
-                    logger.warning("Attempting emergency RTL before exit...")
-                    drone_inst.request_mode_nowait("RTL")
-            except Exception:
-                pass
         return 130
 
 

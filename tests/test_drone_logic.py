@@ -239,6 +239,53 @@ def test_telemetry_snapshot_updates_and_immutable(
         snap.relative_alt = 20.0  # type: ignore
 
 
+def test_home_position_requires_fresh_autopilot_response(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+    conn.rx_queue.put(MockMsg("HOME_POSITION", latitude=100000000, longitude=200000000))
+    drone.wait_until(lambda snap: snap.last_home_time > 0, timeout=1.0, desc="old home")
+
+    def respond_to_request(*args: Any, **kwargs: Any) -> None:
+        conn.rx_queue.put(
+            MockMsg(
+                "HOME_POSITION", latitude=999000000, longitude=999000000, _src_sys=99
+            )
+        )
+        conn.rx_queue.put(
+            MockMsg("HOME_POSITION", latitude=-353632610, longitude=1491652300)
+        )
+        conn.rx_queue.put(
+            MockMsg(
+                "COMMAND_ACK",
+                command=mavutil.mavlink.MAV_CMD_GET_HOME_POSITION,
+                result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+            )
+        )
+
+    conn.mav.command_long_send = respond_to_request
+    assert drone.get_home_position(timeout=1.0) == pytest.approx((-35.363261, 149.165230))
+
+
+def test_home_position_times_out_without_message(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+
+    def ack_without_home(*args: Any, **kwargs: Any) -> None:
+        conn.rx_queue.put(
+            MockMsg(
+                "COMMAND_ACK",
+                command=mavutil.mavlink.MAV_CMD_GET_HOME_POSITION,
+                result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+            )
+        )
+
+    conn.mav.command_long_send = ack_without_home
+    with pytest.raises(DroneError, match="HOME_POSITION response"):
+        drone.get_home_position(timeout=0.2)
+
+
 def test_abort_event_suppresses_goto(mock_drone: tuple[Drone, MockConnection]) -> None:
     drone, conn = mock_drone
 
