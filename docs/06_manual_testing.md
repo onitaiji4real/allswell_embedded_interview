@@ -1,11 +1,10 @@
 # 06 — 手動測試指南（macOS）
 
-從專案根目錄逐項執行。每個飛行測試都要等程式結束，並在下一項開始前重置 SITL；不要同時執行兩個飛行腳本。以下指令使用專案內的 `.venv/bin/python`，不需要啟用虛擬環境。
+先在下載或 clone 後的專案根目錄開啟終端機，再逐項執行。每個飛行測試都要等程式結束，並在下一項開始前重置 SITL；不要同時執行兩個飛行腳本。以下指令使用專案內的 `.venv/bin/python`，不需要啟用虛擬環境。
 
 ## 1. 準備環境
 
 ```bash
-cd /Users/eric_chen/Documents/allswell_embedded_interview
 docker compose up -d --build
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
