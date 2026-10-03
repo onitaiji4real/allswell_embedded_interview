@@ -90,7 +90,7 @@
 
 ## Phase 6 — Bonus（【選做】，擇一）
 
-- [x] B-1：AUTO 任務上傳與飛行，或
+- [ ] B-1：AUTO 任務上傳與飛行，或
 - [x] B-2：Geofence 監控（可複用 Part 3 的 listener 機制，同樣要遵守規則 A）
 
 ---
