@@ -85,7 +85,7 @@
 - [x] 【選做】Ctrl+C 時若在空中，嘗試下 RTL
 - [x] 【選做】1 Hz GCS 心跳
 - [x] 【選做】CLI 參數或環境變數覆寫連線字串
-- [ ] 【選做】把 MAVLink I/O 從 `drone.py` 拆到 `link.py`
+- [x] 【選做】把 MAVLink I/O 從 `drone.py` 拆到 `link.py`
 - [x] 每項完成後都要重跑 Part 1–3 的 SITL 實測，確認沒有退步
 
 ## Phase 6 — Bonus（【選做】，擇一）
@@ -109,3 +109,4 @@
 | 2026-10-04 | 開發者 | 完成 Phase 5 | 完成假連線測試、Ctrl+C RTL 防護、GCS心跳與環境變數支援。 |
 | 2026-10-04 | 開發 AI | 完成 Phase 6 (B-2) | 實作圓形地理圍欄監控（bonus_geofence.py）、80%接近警告、100%越界強制RTL與單元測試，SITL實測通過。 |
 | 2026-10-04 | 開發者 | 完成 Phase 6 | 成功實作 Bonus B-2: 圓形地理圍欄與邊界防護測試。 |
+| 2026-10-04 | 開發 AI | 完成 Phase 5 (link.py 拆分) | 成功將低階 MAVLink I/O 與執行緒管理拆分至 starter/link.py，Drone 維持相同公開 API，全套 pytest 與 SITL 實測通過。 |
