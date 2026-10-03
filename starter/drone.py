@@ -218,7 +218,7 @@ class Drone:
                     self._state["alt"] = msg.alt / 1000.0
 
                 elif mtype == "SYS_STATUS":
-                    if msg.voltage_battery != 0xFFFF:
+                    if msg.voltage_battery not in (0, 0xFFFF):
                         self._state["voltage_battery"] = msg.voltage_battery / 1000.0
 
                 elif mtype == "EKF_STATUS_REPORT":
