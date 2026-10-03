@@ -18,7 +18,7 @@
 | 5 | [04_mavlink_reference.md](04_mavlink_reference.md) | MAVLink 訊息/指令速查與已知陷阱 |
 | 6 | [05_task_plan.md](05_task_plan.md) | 分階段執行計畫與勾選清單 |
 
-## 專案現況（2026-10-04 審查與修正後）
+## 專案現況（2026-10-04 審查、修正與驗證後）
 
 | 檔案 | 狀態 |
 |---|---|
@@ -28,9 +28,9 @@
 | `requirements.txt` | `pymavlink>=2.4.40`、`pytest>=8.0` |
 | `starter/link.py`、`starter/drone.py`、`starter/mission.py`、`starter/geo.py` | 已實作單一接收執行緒、飛行控制、共用任務與座標計算 |
 | `starter/telemetry.py` | 環境驗證腳本（印出模式、是否解鎖、經緯度、相對高度） |
-| `part1_takeoff.py` / `part2_square.py` / `part3_failsafe.py` | 已實作；本次審查前的正常路徑均在 SITL 跑通，修正後驗證見 [05_task_plan.md](05_task_plan.md) |
-| `bonus_geofence.py` | 已實作 B-2 地理圍欄（選做） |
-| `NOTES.md` | 已撰寫精簡英文交付筆記；提交前須納入 git commit |
+| `part1_takeoff.py` / `part2_square.py` / `part3_failsafe.py` | 已實作並於修正後在 SITL 驗證；飛行中錯誤與 Ctrl+C 的返航收尾在連線關閉前執行，結果見 [05_task_plan.md](05_task_plan.md) |
+| `bonus_geofence.py` | 已實作 B-2 地理圍欄（選做），以飛控回報的 Home 為圓心 |
+| `NOTES.md` | 已撰寫精簡交付筆記，涵蓋設計決策、題目解讀與後續方向 |
 
 ## 給接手 AI 的核心原則
 

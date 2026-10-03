@@ -9,7 +9,7 @@ allswell_embedded_interview/
 ├── part1_takeoff.py        # Part 1 入口
 ├── part2_square.py         # Part 2 入口
 ├── part3_failsafe.py       # Part 3 入口
-├── NOTES.md                # 交付筆記（英文，約半頁）
+├── NOTES.md                # 交付筆記（約半頁）
 ├── starter/
 │   ├── __init__.py         # 新增，讓 starter 成為 package
 │   ├── drone.py            # Drone 類別（擴充現有骨架；接收執行緒先直接寫在這裡）

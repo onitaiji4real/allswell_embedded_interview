@@ -91,5 +91,5 @@
 | D-1 | `part1_takeoff.py`、`part2_square.py`、`part3_failsafe.py` | 位於 repo 根目錄，可直接 `python partX_*.py` 執行 |
 | D-2 | 共用模組 | 例如 `starter/drone.py`、`starter/geo.py` |
 | D-3 | 測試（建議） | `pytest` 可在**不需 SITL** 的情況下跑過的單元測試（例如座標計算、ACK 解析） |
-| D-4 | `NOTES.md` | 約半頁英文（原題為英文面試，建議用英文撰寫）：設計決策、更多時間會改什麼、意外發現 |
+| D-4 | `NOTES.md` | 約半頁：設計決策、更多時間會改什麼、意外發現 |
 | D-5 | Git | 以 git repo 連結交付，commit 歷史清楚 |

@@ -25,6 +25,7 @@
 | 切模式 | `MAV_CMD_DO_SET_MODE` (176) | p1=`MAV_MODE_FLAG_CUSTOM_MODE_ENABLED`(1)、p2=custom_mode |
 | 解鎖/上鎖 | `MAV_CMD_COMPONENT_ARM_DISARM` (400) | p1=1 解鎖 / 0 上鎖（p2=21196 強制，**不要用**） |
 | 起飛 | `MAV_CMD_NAV_TAKEOFF` (22) | p7=高度（m，相對 Home） |
+| 取得 Home | `MAV_CMD_GET_HOME_POSITION` (410) | ArduPilot 回 ACK，並送 `HOME_POSITION`；目前 SITL 版本支援 |
 | 請求訊息頻率 | `MAV_CMD_SET_MESSAGE_INTERVAL` (511) | p1=msg id、p2=間隔 µs（可選，用於確保 `EKF_STATUS_REPORT`/`EXTENDED_SYS_STATE` 有串流） |
 
 送出：
@@ -92,6 +93,8 @@ conn.mav.set_position_target_global_int_send(
 - `lat`/`lon`：度 × 1e7（int）
 - `relative_alt`：**mm**（相對 Home）
 - `alt`：mm（MSL）—— 不要拿來比 15 m
+
+地理圍欄的圓心取自飛控的 `HOME_POSITION.latitude/longitude`（度 × 1e7），不可把起飛後當下位置當成 Home。送 `MAV_CMD_GET_HOME_POSITION` 後同時檢查 ACK 與新的 `HOME_POSITION`；若逾時，先安全返航並回報失敗。MAVLink 規格目前建議改用 `MAV_CMD_REQUEST_MESSAGE`（p1=242）；本專案使用 [ArduPilot 文件](https://ardupilot.org/dev/docs/mavlink-get-set-home-and-origin.html)明列支援的 `GET_HOME_POSITION`。
 
 預設水平速度 `WPNAV_SPEED` ≈ 5 m/s（500 cm/s）→ 每邊 80 m 約 16–20 s，整個正方形約 70–90 s。
 

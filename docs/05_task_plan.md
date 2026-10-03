@@ -70,7 +70,7 @@
 
 ## Phase 4 — 交付
 
-- [x] `NOTES.md`（英文，**約半頁，精簡為上**；篇幅不夠時只挑重點，每項 1–2 句）：
+- [x] `NOTES.md`（**約半頁，精簡為上**；篇幅不夠時只挑重點，每項 1–2 句）：
   - [x] 並行模型選擇理由（見 [03_architecture.md](03_architecture.md) §2）
   - [x] 自行補充的解讀 I-1～I-3（見 [01_requirements.md](01_requirements.md) Part 3）：20 秒計時起點、中止返航 exit 0、未觸發 exit 1
   - [x] 更多時間會做的事（挑 2–3 項）
@@ -82,7 +82,7 @@
 ## Phase 5 — 品質強化（全部【選做】，依價值排序）
 
 - [x] 【選做】`tests/test_drone_logic.py`：用假連線測 ACK 接受 / 拒絕 / 逾時路徑（不需 SITL）
-- [x] 【選做】Ctrl+C 時若在空中，嘗試下 RTL
+- [x] 【選做】Ctrl+C 時若在空中，在連線關閉前確認 RTL 並等待落地
 - [x] 【選做】1 Hz GCS 心跳
 - [x] 【選做】CLI 參數或環境變數覆寫連線字串
 - [x] 【選做】把 MAVLink I/O 從 `drone.py` 拆到 `link.py`
@@ -91,7 +91,7 @@
 ## Phase 6 — Bonus（【選做】，擇一）
 
 - [ ] B-1：AUTO 任務上傳與飛行，或
-- [x] B-2：Geofence 監控（可複用 Part 3 的 listener 機制，同樣要遵守規則 A）
+- [x] B-2：Geofence 監控（以飛控回報的 Home 為圓心；複用 Part 3 的 listener 機制，遵守規則 A）
 
 ## Phase 7 — 審查修正（2026-10-04）
 
@@ -105,7 +105,16 @@
 - [x] 修正後 Part 1–3 的 SITL 全流程再次通過，exit code 均為 0
 - [x] 修正後 Bonus B-2 SITL 全流程再次通過，80% 警告、越界 RTL、落地上鎖均確認
 - [x] 測試後重置 SITL
-- [ ] `NOTES.md` 納入交付 commit（本輪依要求暫不處理）
+- [x] `NOTES.md` 納入交付 commit
+
+## Phase 8 — 面試交付前驗證（2026-10-04）
+
+- [x] Part 1／2 飛行中錯誤及 Ctrl+C：在連線關閉前嘗試 RTL 並等落地；共用防護也覆蓋 Part 3 與 Bonus
+- [x] Bonus B-2：向飛控取得新的 `HOME_POSITION`；取得失敗時回報錯誤並安全收尾
+- [x] `pytest`：27 項通過，包含 Home 回覆、逾時及返航失敗分支
+- [x] 重置後的 SITL：Part 1、Part 2、Part 3、Bonus B-2 正常路徑均 exit 0
+- [x] SITL 負向測試：Part 2 第 2 段飛行中 Ctrl+C，RTL、落地上鎖後 exit 130
+- [x] 測試後再次重置 SITL
 
 ---
 
@@ -124,4 +133,5 @@
 | 2026-10-04 | 開發 AI | 完成 Phase 6 (B-2) | 實作圓形地理圍欄監控（bonus_geofence.py）、80%接近警告、100%越界強制RTL與單元測試，SITL實測通過。 |
 | 2026-10-04 | 開發者 | 完成 Phase 6 | 成功實作 Bonus B-2: 圓形地理圍欄與邊界防護測試。 |
 | 2026-10-04 | 開發 AI | 完成 Phase 5 (link.py 拆分) | 成功將低階 MAVLink I/O 與執行緒管理拆分至 starter/link.py，Drone 維持相同公開 API，全套 pytest 與 SITL 實測通過。 |
-| 2026-10-04 | 審查修正 | 修正 Phase 7 安全與交付缺口 | 中止與 goto 原子化、全訊息來源過濾、送出 I/O 錯誤包裝、失敗路徑返航、近地高度驗證、0 mV 觸發及文件精簡。20 項 pytest 通過；Part 1–3 與 Bonus B-2 均在重置後的 SITL 全流程 exit 0；測試後再次重置 SITL。程式與文件依內容分批提交；NOTES.md 依本輪要求保持未追蹤。 |
+| 2026-10-04 | 審查修正 | 修正 Phase 7 安全與交付缺口 | 中止與 goto 原子化、全訊息來源過濾、送出 I/O 錯誤包裝、失敗路徑返航、近地高度驗證、0 mV 觸發及文件精簡。20 項 pytest 通過；Part 1–3 與 Bonus B-2 均在重置後的 SITL 全流程 exit 0；測試後再次重置 SITL。程式與文件依內容分批提交。 |
+| 2026-10-04 | 審查修正 | 完成 Phase 8 交付前驗證 | 修正飛行中錯誤／Ctrl+C 的返航收尾時序，圍欄改採飛控的 Home；27 項 pytest 通過。Part 1–3 與 Bonus B-2 在重置後的 SITL 正常路徑 exit 0；Part 2 飛行中 Ctrl+C 確認 RTL、落地上鎖後 exit 130；最後再次重置 SITL。 |
