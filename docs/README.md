@@ -18,7 +18,7 @@
 | 5 | [04_mavlink_reference.md](04_mavlink_reference.md) | MAVLink 訊息/指令速查與已知陷阱 |
 | 6 | [05_task_plan.md](05_task_plan.md) | 分階段執行計畫與勾選清單 |
 
-## 專案現況（交接時）
+## 專案現況（2026-10-04 審查與修正後）
 
 | 檔案 | 狀態 |
 |---|---|
@@ -26,9 +26,11 @@
 | `docker-compose.yml` | 啟動 SITL，對外開 `5760`（程式用）、`5762`（地面站用） |
 | `sitl/Dockerfile` | 編譯 ArduCopter `Copter-4.5.7`，Home 在澳洲坎培拉 CMAC 場地，`-w` 每次啟動清除 EEPROM |
 | `requirements.txt` | `pymavlink>=2.4.40`、`pytest>=8.0` |
-| `starter/drone.py` | 骨架：`Drone` 類別已完成連線 + 心跳 + 請求資料串流；`set_mode / arm / takeoff / goto` 皆為 `NotImplementedError` |
+| `starter/link.py`、`starter/drone.py`、`starter/mission.py`、`starter/geo.py` | 已實作單一接收執行緒、飛行控制、共用任務與座標計算 |
 | `starter/telemetry.py` | 環境驗證腳本（印出模式、是否解鎖、經緯度、相對高度） |
-| `part1_takeoff.py` / `part2_square.py` / `part3_failsafe.py` / `NOTES.md` | **尚未建立**（待完成） |
+| `part1_takeoff.py` / `part2_square.py` / `part3_failsafe.py` | 已實作；本次審查前的正常路徑均在 SITL 跑通，修正後驗證見 [05_task_plan.md](05_task_plan.md) |
+| `bonus_geofence.py` | 已實作 B-2 地理圍欄（選做） |
+| `NOTES.md` | 已撰寫精簡英文交付筆記；提交前須納入 git commit |
 
 ## 給接手 AI 的核心原則
 

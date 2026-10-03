@@ -56,7 +56,7 @@
 
 - [x] `request_mode_nowait()`：只送不等的 DO_SET_MODE
 - [x] `set_param()`：PARAM_SET + PARAM_VALUE 確認 + 重試；**不受 `abort_event` 影響**
-- [x] 電池監控 listener（在接收執行緒中執行，**只做不會卡住的事**）：`voltage < 11.0 V` → 寫 log → `abort_event.set()` → `request_mode_nowait("RTL")`
+- [x] 電池監控 listener（在接收執行緒中執行，**只做不會卡住的事**）：`voltage < 11.0 V` → 以 `abort_and_request_mode_nowait("RTL")` 原子化中止與 RTL 請求 → 寫 log
 - [x] 任務邏輯收到中止後立即停止送 goto（`goto()` 拋 `MissionAborted` / `fly_to()` 跳出）
 - [x] 故障注入：正方形第一段開始後約 20 s 設 `SIM_BATT_VOLTAGE=10.5`；若在背景執行緒執行，結束前要 `join()`，確保「參數已確認」有寫進日誌
 - [x] 主執行緒捕捉 `MissionAborted` → 確認 RTL（若已是 RTL/LAND 就直接記錄）→ 等落地上鎖 → exit 0
@@ -93,6 +93,20 @@
 - [ ] B-1：AUTO 任務上傳與飛行，或
 - [x] B-2：Geofence 監控（可複用 Part 3 的 listener 機制，同樣要遵守規則 A）
 
+## Phase 7 — 審查修正（2026-10-04）
+
+- [x] 中止旗標與 goto 使用同一把送出鎖，新增競爭條件回歸測試
+- [x] Part 3 未觸發、參數失敗及航段錯誤時，先嘗試 RTL 並等落地，再回報失敗
+- [x] 過濾非目標自駕儀的遙測、ACK、參數回覆和 listener 輸入
+- [x] 將送出 I/O 例外轉成 `DroneError`；任務中的 0 mV 視為低電壓
+- [x] 落地判斷同時檢查上鎖與近期近地位置
+- [x] 精簡 `NOTES.md`，修正過時的交接文件與驗收標準
+- [x] `pytest` 回歸測試通過（20 項，含失敗路徑安全收尾、初次 RTL 送出失敗及降落失敗時等待注入確認）
+- [x] 修正後 Part 1–3 的 SITL 全流程再次通過，exit code 均為 0
+- [x] 修正後 Bonus B-2 SITL 全流程再次通過，80% 警告、越界 RTL、落地上鎖均確認
+- [x] 測試後重置 SITL
+- [ ] `NOTES.md` 納入交付 commit（本輪依要求暫不處理）
+
 ---
 
 ## 進度紀錄
@@ -110,3 +124,4 @@
 | 2026-10-04 | 開發 AI | 完成 Phase 6 (B-2) | 實作圓形地理圍欄監控（bonus_geofence.py）、80%接近警告、100%越界強制RTL與單元測試，SITL實測通過。 |
 | 2026-10-04 | 開發者 | 完成 Phase 6 | 成功實作 Bonus B-2: 圓形地理圍欄與邊界防護測試。 |
 | 2026-10-04 | 開發 AI | 完成 Phase 5 (link.py 拆分) | 成功將低階 MAVLink I/O 與執行緒管理拆分至 starter/link.py，Drone 維持相同公開 API，全套 pytest 與 SITL 實測通過。 |
+| 2026-10-04 | 審查修正 | 修正 Phase 7 安全與交付缺口 | 中止與 goto 原子化、全訊息來源過濾、送出 I/O 錯誤包裝、失敗路徑返航、近地高度驗證、0 mV 觸發及文件精簡。20 項 pytest 通過；Part 1–3 與 Bonus B-2 均在重置後的 SITL 全流程 exit 0；測試後再次重置 SITL。程式與文件依內容分批提交；NOTES.md 依本輪要求保持未追蹤。 |
