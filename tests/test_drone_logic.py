@@ -10,6 +10,7 @@ import pytest
 from pymavlink import mavutil
 
 from starter.drone import Drone, DroneError, MissionAborted
+from starter.geo import horizontal_distance_m, offset_latlon
 
 
 class MockMsg:
@@ -247,3 +248,81 @@ def test_abort_event_suppresses_goto(mock_drone: tuple[Drone, MockConnection]) -
 
     # Verify no position command was sent to MAVLink
     assert len(conn.mav.sent_positions) == 0
+
+
+def test_geofence_approach_and_breach_detection(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+    home_lat = -35.363261
+    home_lon = 149.165230
+    fence_radius = 100.0
+    warn_radius = 80.0
+
+    events: list[tuple[str, float]] = []
+
+    def geofence_listener(msg: Any) -> None:
+        if msg.get_type() == "GLOBAL_POSITION_INT":
+            lat = msg.lat / 1e7
+            lon = msg.lon / 1e7
+            dist = horizontal_distance_m(home_lat, home_lon, lat, lon)
+            if warn_radius <= dist < fence_radius:
+                events.append(("WARN", dist))
+            elif dist >= fence_radius:
+                events.append(("BREACH", dist))
+                drone.abort_event.set()
+                drone.request_mode_nowait("RTL")
+
+    drone.add_listener(geofence_listener)
+
+    # 1. Safe zone (50m)
+    p_safe_lat, p_safe_lon = offset_latlon(home_lat, home_lon, north_m=50.0, east_m=0.0)
+    conn.rx_queue.put(
+        MockMsg(
+            "GLOBAL_POSITION_INT",
+            lat=int(p_safe_lat * 1e7),
+            lon=int(p_safe_lon * 1e7),
+            relative_alt=15000,
+            alt=599000,
+        )
+    )
+    time.sleep(0.05)
+    assert len(events) == 0
+    assert not drone.abort_event.is_set()
+
+    # 2. Warning zone (85m)
+    p_warn_lat, p_warn_lon = offset_latlon(home_lat, home_lon, north_m=85.0, east_m=0.0)
+    conn.rx_queue.put(
+        MockMsg(
+            "GLOBAL_POSITION_INT",
+            lat=int(p_warn_lat * 1e7),
+            lon=int(p_warn_lon * 1e7),
+            relative_alt=15000,
+            alt=599000,
+        )
+    )
+    time.sleep(0.05)
+    assert len(events) == 1
+    assert events[0][0] == "WARN"
+    assert not drone.abort_event.is_set()
+
+    # 3. Breach zone (105m)
+    p_breach_lat, p_breach_lon = offset_latlon(home_lat, home_lon, north_m=105.0, east_m=0.0)
+    conn.rx_queue.put(
+        MockMsg(
+            "GLOBAL_POSITION_INT",
+            lat=int(p_breach_lat * 1e7),
+            lon=int(p_breach_lon * 1e7),
+            relative_alt=15000,
+            alt=599000,
+        )
+    )
+    time.sleep(0.05)
+    assert len(events) == 2
+    assert events[1][0] == "BREACH"
+    assert drone.abort_event.is_set()
+
+    # Verify DO_SET_MODE (cmd 176) RTL was dispatched non-blocking
+    assert len(conn.mav.sent_commands) == 1
+    assert conn.mav.sent_commands[0]["command"] == mavutil.mavlink.MAV_CMD_DO_SET_MODE
+
