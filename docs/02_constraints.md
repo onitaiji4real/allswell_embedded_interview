@@ -57,6 +57,7 @@ if __name__ == "__main__":
 
 - Part 3 的任務邏輯與安全監控**必須共用同一條連線**（不可開第二條連線給監控器用）。
 - `pymavlink` 的連線物件**不是執行緒安全**的：不可讓多個執行緒同時呼叫 `recv_match()`。架構方案見 [03_architecture.md](03_architecture.md)。
+- 在接收執行緒中被呼叫的 listener **絕不可等待任何回應**（ACK、PARAM_VALUE、遙測條件），否則會死鎖。詳見 [03_architecture.md](03_architecture.md) §2 規則 A。
 
 ## 6. 環境
 
