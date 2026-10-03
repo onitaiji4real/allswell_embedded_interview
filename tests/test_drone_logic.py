@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import threading
 import time
 from dataclasses import FrozenInstanceError
 from typing import Any
@@ -250,6 +251,135 @@ def test_abort_event_suppresses_goto(mock_drone: tuple[Drone, MockConnection]) -
     assert len(conn.mav.sent_positions) == 0
 
 
+def test_abort_waits_for_inflight_goto_before_setting_flag(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+    send_entered = threading.Event()
+    release_send = threading.Event()
+    order: list[str] = []
+    original_goto = conn.mav.set_position_target_global_int_send
+    original_command = conn.mav.command_long_send
+
+    def delayed_goto(*args: Any, **kwargs: Any) -> None:
+        send_entered.set()
+        assert release_send.wait(2)
+        order.append("goto")
+        original_goto(*args, **kwargs)
+
+    def record_command(*args: Any, **kwargs: Any) -> None:
+        order.append("RTL")
+        original_command(*args, **kwargs)
+
+    conn.mav.set_position_target_global_int_send = delayed_goto
+    conn.mav.command_long_send = record_command
+    goto_worker = threading.Thread(target=drone.goto, args=(-35.363, 149.165, 15.0))
+    abort_worker = threading.Thread(target=drone.abort_and_request_mode_nowait)
+    goto_worker.start()
+    assert send_entered.wait(2)
+    abort_worker.start()
+    assert not drone.abort_event.is_set()
+    release_send.set()
+    goto_worker.join(2)
+    abort_worker.join(2)
+
+    assert not goto_worker.is_alive() and not abort_worker.is_alive()
+    assert order == ["goto", "RTL"]
+    assert drone.abort_event.is_set()
+    with pytest.raises(MissionAborted):
+        drone.goto(-35.363, 149.165, 15.0)
+    assert len(conn.mav.sent_positions) == 1
+
+
+def test_foreign_messages_cannot_update_state_or_confirm_commands(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+    seen: list[str] = []
+    processed = threading.Event()
+
+    def record_message(msg: Any) -> None:
+        seen.append(msg.get_type())
+        processed.set()
+
+    drone.add_listener(record_message)
+    conn.rx_queue.put(MockMsg("SYS_STATUS", voltage_battery=10500, _src_sys=99))
+    conn.rx_queue.put(MockMsg("SYS_STATUS", voltage_battery=0, _src_sys=1))
+    assert processed.wait(1)
+    # The matching zero is valid; the foreign 10.5 V must not reach the listener.
+    assert seen == ["SYS_STATUS"]
+    assert drone.telemetry.voltage_battery == 0
+
+    def ack_after_send() -> None:
+        deadline = time.monotonic() + 2
+        while not conn.mav.sent_commands and time.monotonic() < deadline:
+            time.sleep(0.01)
+        conn.rx_queue.put(
+            MockMsg(
+                "COMMAND_ACK",
+                command=mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+                result=mavutil.mavlink.MAV_RESULT_DENIED,
+                _src_sys=99,
+            )
+        )
+        conn.rx_queue.put(
+            MockMsg(
+                "COMMAND_ACK",
+                command=mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+                result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+                _src_sys=1,
+            )
+        )
+
+    feeder = threading.Thread(target=ack_after_send)
+    feeder.start()
+    drone.send_command_long(mavutil.mavlink.MAV_CMD_DO_SET_MODE, timeout=1.0, retries=0)
+    feeder.join(2)
+    assert not feeder.is_alive()
+
+
+def test_send_socket_error_becomes_drone_error(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+
+    def broken_send(*args: Any, **kwargs: Any) -> None:
+        raise OSError("socket closed")
+
+    conn.mav.command_long_send = broken_send
+    with pytest.raises(DroneError, match="Failed to send MAV_CMD_DO_SET_MODE: socket closed"):
+        drone.send_command_long(mavutil.mavlink.MAV_CMD_DO_SET_MODE, retries=0)
+
+
+def test_abort_remains_active_when_first_rtl_send_fails(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+
+    def broken_send(*args: Any, **kwargs: Any) -> None:
+        raise OSError("socket closed")
+
+    conn.mav.command_long_send = broken_send
+    assert drone.abort_and_request_mode_nowait("RTL")
+    assert drone.abort_event.is_set()
+    with pytest.raises(MissionAborted):
+        drone.goto(-35.363, 149.165, 15.0)
+
+
+def test_disarmed_at_altitude_is_not_landed(
+    mock_drone: tuple[Drone, MockConnection]
+) -> None:
+    drone, conn = mock_drone
+    conn.rx_queue.put(MockMsg("GLOBAL_POSITION_INT", lat=0, lon=0, relative_alt=15000, alt=0))
+    drone.wait_until(lambda snap: snap.relative_alt == 15.0, timeout=1.0, desc="position")
+    with pytest.raises(DroneError, match="Timed out"):
+        drone.wait_landed_disarmed(timeout=0.1)
+
+    conn.rx_queue.put(MockMsg("GLOBAL_POSITION_INT", lat=0, lon=0, relative_alt=100, alt=0))
+    drone.wait_until(lambda snap: snap.relative_alt == 0.1, timeout=1.0, desc="ground position")
+    drone.wait_landed_disarmed(timeout=1.0)
+
+
 def test_geofence_approach_and_breach_detection(
     mock_drone: tuple[Drone, MockConnection]
 ) -> None:
@@ -325,4 +455,3 @@ def test_geofence_approach_and_breach_detection(
     # Verify DO_SET_MODE (cmd 176) RTL was dispatched non-blocking
     assert len(conn.mav.sent_commands) == 1
     assert conn.mav.sent_commands[0]["command"] == mavutil.mavlink.MAV_CMD_DO_SET_MODE
-

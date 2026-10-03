@@ -79,6 +79,10 @@ class Drone:
         """Send non-blocking mode change command (delegated to link)."""
         self.link.request_mode_nowait(mode_name)
 
+    def abort_and_request_mode_nowait(self, mode_name: str = "RTL") -> bool:
+        """Stop navigation and request a safety mode as one ordered operation."""
+        return self.link.abort_and_request_mode_nowait(mode_name)
+
     def set_param(self, name: str, value: float, *args: Any, **kwargs: Any) -> float:
         """Set a simulator parameter and verify response (delegated to link)."""
         return self.link.set_param(name, value, *args, **kwargs)
@@ -332,7 +336,7 @@ class Drone:
         )
 
     def wait_landed_disarmed(self, timeout: float = 180.0) -> None:
-        """Wait until drone lands and disarms (abortable=False)."""
+        """Wait for disarm and a recent ground-level position (abortable=False)."""
         self.log.info("Waiting for landing and disarm...")
         start_time = time.time()
         last_log = 0.0
@@ -340,7 +344,11 @@ class Drone:
             if self.link.is_link_broken:
                 raise DroneError("Connection lost while waiting for landing")
             snap = self.telemetry
-            if not snap.armed:
+            position_is_fresh = (
+                snap.last_position_time > 0
+                and time.time() - snap.last_position_time <= 2.0
+            )
+            if not snap.armed and position_is_fresh and abs(snap.relative_alt) <= 0.5:
                 self.log.info("Landed and disarmed. Mission complete.")
                 return
             now = time.time()

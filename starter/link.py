@@ -50,6 +50,7 @@ class TelemetrySnapshot:
     ekf_flags: int = 0
     gps_fix: int = 0
     landed_state: int = 0
+    last_position_time: float = 0.0
     last_heartbeat_time: float = 0.0
     last_statustext: str = ""
 
@@ -89,6 +90,7 @@ class MavlinkLink:
             "ekf_flags": 0,
             "gps_fix": 0,
             "landed_state": 0,
+            "last_position_time": 0.0,
             "last_heartbeat_time": 0.0,
             "last_statustext": "",
         }
@@ -121,11 +123,23 @@ class MavlinkLink:
                 raise DroneError(f"Failed to connect to {connection_string}: {e}") from None
 
         try:
-            hb = self.conn.wait_heartbeat(timeout=heartbeat_timeout)
-            if hb is None:
-                raise DroneError(
-                    f"No heartbeat received within {heartbeat_timeout}s — is SITL running?"
-                )
+            deadline = time.monotonic() + heartbeat_timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DroneError(
+                        f"No autopilot heartbeat received within {heartbeat_timeout}s — is SITL running?"
+                    )
+                hb = self.conn.wait_heartbeat(timeout=remaining)
+                if hb is None:
+                    raise DroneError(
+                        f"No autopilot heartbeat received within {heartbeat_timeout}s — is SITL running?"
+                    )
+                if (
+                    hb.get_srcComponent() == mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
+                    and hb.type != mavutil.mavlink.MAV_TYPE_GCS
+                ):
+                    break
         except Exception as e:
             if isinstance(e, DroneError):
                 raise
@@ -143,14 +157,21 @@ class MavlinkLink:
         )
 
         # Request telemetry stream (4 Hz)
-        with self._send_lock:
-            self.conn.mav.request_data_stream_send(
-                self.target_system,
-                self.target_component,
-                mavutil.mavlink.MAV_DATA_STREAM_ALL,
-                4,
-                1,
-            )
+        try:
+            with self._send_lock:
+                self.conn.mav.request_data_stream_send(
+                    self.target_system,
+                    self.target_component,
+                    mavutil.mavlink.MAV_DATA_STREAM_ALL,
+                    4,
+                    1,
+                )
+        except Exception as e:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            raise DroneError(f"Failed to request telemetry: {e}") from None
 
         # Start single background receiver thread
         self._rx_thread = threading.Thread(target=self._rx_loop, name="Link-RX", daemon=True)
@@ -230,13 +251,19 @@ class MavlinkLink:
                 break
 
             now = time.time()
+            if self._last_hb_time > 0 and now - self._last_hb_time > 15.0:
+                self._link_broken = True
             if msg is None:
-                if self._last_hb_time > 0 and now - self._last_hb_time > 15.0:
-                    self._link_broken = True
                 continue
 
             mtype = msg.get_type()
             if mtype == "BAD_DATA":
+                continue
+            # Every state update, response and safety callback must belong to this autopilot.
+            if (
+                msg.get_srcSystem() != self.target_system
+                or msg.get_srcComponent() != self.target_component
+            ):
                 continue
 
             # Update telemetry state snapshot
@@ -260,10 +287,11 @@ class MavlinkLink:
                     self._state["lon"] = msg.lon / 1e7
                     self._state["relative_alt"] = getattr(msg, "relative_alt", 0.0) / 1000.0
                     self._state["alt"] = getattr(msg, "alt", 0.0) / 1000.0
+                    self._state["last_position_time"] = now
 
                 elif mtype == "SYS_STATUS":
                     v_raw = getattr(msg, "voltage_battery", 0xFFFF)
-                    if v_raw not in (0, 0xFFFF):
+                    if v_raw != 0xFFFF:
                         self._state["voltage_battery"] = v_raw / 1000.0
 
                 elif mtype == "EKF_STATUS_REPORT":
@@ -338,20 +366,23 @@ class MavlinkLink:
                 self._ack_waiters[command].append((waiter_ev, waiter_holder))
 
             try:
-                with self._send_lock:
-                    self.conn.mav.command_long_send(
-                        self.target_system,
-                        self.target_component,
-                        command,
-                        attempt,
-                        param1,
-                        param2,
-                        param3,
-                        param4,
-                        param5,
-                        param6,
-                        param7,
-                    )
+                try:
+                    with self._send_lock:
+                        self.conn.mav.command_long_send(
+                            self.target_system,
+                            self.target_component,
+                            command,
+                            attempt,
+                            param1,
+                            param2,
+                            param3,
+                            param4,
+                            param5,
+                            param6,
+                            param7,
+                        )
+                except Exception as e:
+                    raise DroneError(f"Failed to send {cmd_name}: {e}") from None
 
                 deadline = time.time() + timeout
                 while time.time() < deadline:
@@ -409,8 +440,34 @@ class MavlinkLink:
             self.log.error("Unknown flight mode for request_mode_nowait: %s", mode_name)
             return
 
-        custom_mode = mode_map[mode_name]
         with self._send_lock:
+            self._send_mode_unlocked(mode_map[mode_name])
+
+    def abort_and_request_mode_nowait(self, mode_name: str = "RTL") -> bool:
+        """Atomically stop future goto packets and request a safety mode.
+
+        Returns False when another listener already requested an abort.
+        The receiver thread must never wait for the mode ACK here.
+        """
+        mode_map = self.conn.mode_mapping()
+        if not mode_map:
+            mode_map = {"RTL": 6, "LAND": 9}
+        if mode_name not in mode_map:
+            raise DroneError(f"Unknown safety mode: {mode_name}")
+        with self._send_lock:
+            if self.abort_event.is_set():
+                return False
+            self.abort_event.set()
+            try:
+                self._send_mode_unlocked(mode_map[mode_name])
+            except DroneError as e:
+                # The mission thread observes abort_event and retries RTL with ACK/telemetry.
+                self.log.warning("Initial safety mode request failed; main thread will retry: %s", e)
+        return True
+
+    def _send_mode_unlocked(self, custom_mode: int) -> None:
+        """Send a mode command while the caller owns _send_lock."""
+        try:
             self.conn.mav.command_long_send(
                 self.target_system,
                 self.target_component,
@@ -424,6 +481,8 @@ class MavlinkLink:
                 0,
                 0,
             )
+        except Exception as e:
+            raise DroneError(f"Failed to request flight mode {custom_mode}: {e}") from None
 
     def set_param(
         self,
@@ -444,14 +503,17 @@ class MavlinkLink:
                 self._param_waiters[name].append((waiter_ev, waiter_holder))
 
             try:
-                with self._send_lock:
-                    self.conn.mav.param_set_send(
-                        self.target_system,
-                        self.target_component,
-                        param_bytes,
-                        value,
-                        mavutil.mavlink.MAV_PARAM_TYPE_REAL32,
-                    )
+                try:
+                    with self._send_lock:
+                        self.conn.mav.param_set_send(
+                            self.target_system,
+                            self.target_component,
+                            param_bytes,
+                            value,
+                            mavutil.mavlink.MAV_PARAM_TYPE_REAL32,
+                        )
+                except Exception as e:
+                    raise DroneError(f"Failed to send parameter {name}: {e}") from None
                 if waiter_ev.wait(timeout):
                     msg = waiter_holder[0]
                     val = msg.param_value
@@ -479,21 +541,24 @@ class MavlinkLink:
         with self._send_lock:
             if self.abort_event.is_set():
                 raise MissionAborted("Mission abort flag is set; goto suppressed")
-            self.conn.mav.set_position_target_global_int_send(
-                0,  # time_boot_ms
-                self.target_system,
-                self.target_component,
-                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-                0b0000_1111_1111_1000,  # type_mask: position only
-                int(lat * 1e7),
-                int(lon * 1e7),
-                alt_m,
-                0,
-                0,
-                0,  # vx, vy, vz
-                0,
-                0,
-                0,  # afx, afy, afz
-                0,
-                0,  # yaw, yaw_rate
-            )
+            try:
+                self.conn.mav.set_position_target_global_int_send(
+                    0,  # time_boot_ms
+                    self.target_system,
+                    self.target_component,
+                    mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                    0b0000_1111_1111_1000,  # type_mask: position only
+                    int(lat * 1e7),
+                    int(lon * 1e7),
+                    alt_m,
+                    0,
+                    0,
+                    0,  # vx, vy, vz
+                    0,
+                    0,
+                    0,  # afx, afy, afz
+                    0,
+                    0,  # yaw, yaw_rate
+                )
+            except Exception as e:
+                raise DroneError(f"Failed to send goto: {e}") from None
