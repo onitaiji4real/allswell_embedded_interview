@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Callable
 
-from starter.drone import Drone
+from starter.drone import Drone, DroneError
 from starter.geo import square_corners
 
 logger = logging.getLogger(__name__)
@@ -21,9 +23,38 @@ def takeoff_sequence(drone: Drone, altitude_m: float = 15.0) -> None:
 
 def rtl_and_wait(drone: Drone, timeout: float = 180.0) -> None:
     """Command RTL mode and wait until drone touches down and disarms."""
-    if drone.telemetry.mode != "RTL":
+    if drone.telemetry.mode not in ("RTL", "LAND"):
         drone.set_mode("RTL", timeout=10.0)
     drone.wait_landed_disarmed(timeout=timeout)
+
+
+def recover_airborne(drone: Drone, timeout: float = 180.0) -> None:
+    """Best-effort RTL while the MAVLink connection is still open."""
+    if not drone.telemetry.armed:
+        return
+    drone.log.warning(
+        "Flight interrupted while armed; requesting RTL and waiting for landing..."
+    )
+    try:
+        if drone.telemetry.mode not in ("RTL", "LAND"):
+            try:
+                drone.set_mode("RTL", timeout=10.0)
+            except DroneError as error:
+                drone.log.warning("RTL confirmation failed; retrying without ACK: %s", error)
+                drone.request_mode_nowait("RTL")
+        drone.wait_landed_disarmed(timeout=timeout)
+    except DroneError as error:
+        drone.log.error("Emergency landing could not be confirmed: %s", error)
+
+
+@contextmanager
+def flight_guard(drone: Drone) -> Iterator[None]:
+    """Keep the transport open for best-effort recovery on flight errors."""
+    try:
+        yield
+    except (DroneError, KeyboardInterrupt):
+        recover_airborne(drone)
+        raise
 
 
 def fly_square_mission(

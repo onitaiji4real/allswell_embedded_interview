@@ -11,7 +11,7 @@ import threading
 from typing import Any
 
 from starter.drone import Drone, DroneError, MissionAborted
-from starter.mission import fly_square_mission, takeoff_sequence
+from starter.mission import flight_guard, fly_square_mission, takeoff_sequence
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,10 +39,8 @@ def main() -> int:
     if not math.isfinite(args.fault_delay) or args.fault_delay < 0:
         parser.error("--fault-delay must be a finite non-negative number")
 
-    drone_inst: Drone | None = None
     try:
-        with Drone(connection_string=args.connect, log=logger) as drone:
-            drone_inst = drone
+        with Drone(connection_string=args.connect, log=logger) as drone, flight_guard(drone):
             leg_info = {"current": 0}
             fault_status: dict[str, Any] = {"confirmed": False, "val": 0.0, "error": None}
             abort_info = {"battery": False}
@@ -189,14 +187,6 @@ def main() -> int:
         return 1
     except KeyboardInterrupt:
         logger.error("Interrupted by user (Ctrl+C)")
-        if drone_inst is not None:
-            try:
-                snap = drone_inst.telemetry
-                if snap.armed and snap.relative_alt > 1.0:
-                    logger.warning("Attempting emergency RTL before exit...")
-                    drone_inst.request_mode_nowait("RTL")
-            except Exception:
-                pass
         return 130
 
 

@@ -8,7 +8,7 @@ import os
 import sys
 
 from starter.drone import Drone, DroneError
-from starter.mission import fly_square_mission, rtl_and_wait, takeoff_sequence
+from starter.mission import flight_guard, fly_square_mission, rtl_and_wait, takeoff_sequence
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,10 +28,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    drone_inst: Drone | None = None
     try:
-        with Drone(connection_string=args.connect, log=logger) as drone:
-            drone_inst = drone
+        with Drone(connection_string=args.connect, log=logger) as drone, flight_guard(drone):
             # 1. Takeoff to 15 m
             takeoff_sequence(drone, altitude_m=15.0)
 
@@ -50,14 +48,6 @@ def main() -> int:
         return 1
     except KeyboardInterrupt:
         logger.error("Interrupted by user (Ctrl+C)")
-        if drone_inst is not None:
-            try:
-                snap = drone_inst.telemetry
-                if snap.armed and snap.relative_alt > 1.0:
-                    logger.warning("Attempting emergency RTL before exit...")
-                    drone_inst.request_mode_nowait("RTL")
-            except Exception:
-                pass
         return 130
 
 

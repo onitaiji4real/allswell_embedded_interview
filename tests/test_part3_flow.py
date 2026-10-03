@@ -16,7 +16,7 @@ class FakeDrone:
     def __init__(self, **kwargs: Any) -> None:
         self.log = kwargs["log"]
         self.abort_event = threading.Event()
-        self.telemetry = SimpleNamespace(mode="GUIDED")
+        self.telemetry = SimpleNamespace(mode="GUIDED", armed=True)
         self.listener: Any = None
         self.landing_waited = False
         self.param_should_fail = False
