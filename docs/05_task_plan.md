@@ -54,29 +54,29 @@
 
 > 實作前**必讀** [03_architecture.md](03_architecture.md) §2 的規則 A（listener 不可等待）與規則 B（競爭條件）。
 
-- [ ] `request_mode_nowait()`：只送不等的 DO_SET_MODE
-- [ ] `set_param()`：PARAM_SET + PARAM_VALUE 確認 + 重試；**不受 `abort_event` 影響**
-- [ ] 電池監控 listener（在接收執行緒中執行，**只做不會卡住的事**）：`voltage < 11.0 V` → 寫 log → `abort_event.set()` → `request_mode_nowait("RTL")`
-- [ ] 任務邏輯收到中止後立即停止送 goto（`goto()` 拋 `MissionAborted` / `fly_to()` 跳出）
-- [ ] 故障注入：正方形第一段開始後約 20 s 設 `SIM_BATT_VOLTAGE=10.5`；若在背景執行緒執行，結束前要 `join()`，確保「參數已確認」有寫進日誌
-- [ ] 主執行緒捕捉 `MissionAborted` → 確認 RTL（若已是 RTL/LAND 就直接記錄）→ 等落地上鎖 → exit 0
-- [ ] 參數確認失敗 → 即使已安全返航也 exit 1
-- [ ] 若正方形飛完仍未觸發中止 → exit 1
-- [ ] 處理自駕儀自身 failsafe 已切到 RTL/LAND 的情況
-- [ ] **SITL 實測**：日誌完整呈現故事，且「參數已確認」和「ABORT」兩行都有出現
-- [ ] **SITL 實測**：確認 ABORT 之後的日誌裡沒有任何 goto 送出
-- [ ] 測試後 `docker compose restart`
-- [ ] git commit
+- [x] `request_mode_nowait()`：只送不等的 DO_SET_MODE
+- [x] `set_param()`：PARAM_SET + PARAM_VALUE 確認 + 重試；**不受 `abort_event` 影響**
+- [x] 電池監控 listener（在接收執行緒中執行，**只做不會卡住的事**）：`voltage < 11.0 V` → 寫 log → `abort_event.set()` → `request_mode_nowait("RTL")`
+- [x] 任務邏輯收到中止後立即停止送 goto（`goto()` 拋 `MissionAborted` / `fly_to()` 跳出）
+- [x] 故障注入：正方形第一段開始後約 20 s 設 `SIM_BATT_VOLTAGE=10.5`；若在背景執行緒執行，結束前要 `join()`，確保「參數已確認」有寫進日誌
+- [x] 主執行緒捕捉 `MissionAborted` → 確認 RTL（若已是 RTL/LAND 就直接記錄）→ 等落地上鎖 → exit 0
+- [x] 參數確認失敗 → 即使已安全返航也 exit 1
+- [x] 若正方形飛完仍未觸發中止 → exit 1
+- [x] 處理自駕儀自身 failsafe 已切到 RTL/LAND 的情況
+- [x] **SITL 實測**：日誌完整呈現故事，且「參數已確認」和「ABORT」兩行都有出現
+- [x] **SITL 實測**：確認 ABORT 之後的日誌裡沒有任何 goto 送出
+- [x] 測試後 `docker compose restart`
+- [x] git commit
 
 ## Phase 4 — 交付
 
-- [ ] `NOTES.md`（英文，**約半頁，精簡為上**；篇幅不夠時只挑重點，每項 1–2 句）：
-  - [ ] 並行模型選擇理由（見 [03_architecture.md](03_architecture.md) §2）
-  - [ ] 自行補充的解讀 I-1～I-3（見 [01_requirements.md](01_requirements.md) Part 3）：20 秒計時起點、中止返航 exit 0、未觸發 exit 1
-  - [ ] 更多時間會做的事（挑 2–3 項）
-  - [ ] 意外發現（挑 1–2 項，例如 ACK 和實際狀態不同步、auto-disarm、自駕儀自身電池 failsafe）
-- [ ] 根目錄 `README.md` 不修改（或只在最底部加「如何執行」段落）
-- [ ] `pytest` 全部通過
+- [x] `NOTES.md`（英文，**約半頁，精簡為上**；篇幅不夠時只挑重點，每項 1–2 句）：
+  - [x] 並行模型選擇理由（見 [03_architecture.md](03_architecture.md) §2）
+  - [x] 自行補充的解讀 I-1～I-3（見 [01_requirements.md](01_requirements.md) Part 3）：20 秒計時起點、中止返航 exit 0、未觸發 exit 1
+  - [x] 更多時間會做的事（挑 2–3 項）
+  - [x] 意外發現（挑 1–2 項，例如 ACK 和實際狀態不同步、auto-disarm、自駕儀自身電池 failsafe）
+- [x] 根目錄 `README.md` 不修改（或只在最底部加「如何執行」段落）
+- [x] `pytest` 全部通過
 - [ ] 清楚的 git commit 歷史
 
 ## Phase 5 — 品質強化（全部【選做】，依價值排序）
@@ -103,4 +103,5 @@
 | 2026-10-04 | 規劃 AI | 依審查意見修訂 docs | 修正 listener 死鎖風險、中止和參數確認的競爭條件；改成先跑通再重構；統一日誌格式；把 I-1～I-3 列入 NOTES 必寫 |
 | 2026-10-04 | 開發者 | 完成 Phase 0 與 Phase 1 | 已完成 Part 1 的底層架構、起飛測試並更新了相關的確認機制。 |
 | 2026-10-04 | 開發者 | 完成 Phase 2 | 成功實作與測試 Part 2，飛行正方形並安全降落。 |
-| 2026-10-04 | 開發者 | 完成 Phase 2 | 成功實作與測試 Part 2，飛行正方形並安全降落。 |
+| 2026-10-04 | 開發 AI | 完成 Phase 3 與 Phase 4 | 實作 Part 3 電池失效保護與參數注入，SITL 驗證成功中止返航；交付 NOTES.md。 |
+| 2026-10-04 | 開發者 | 完成 Phase 3 和 Phase 4 | 成功實作 Part 3 並行監控與故障注入，文件更新完成。 |
