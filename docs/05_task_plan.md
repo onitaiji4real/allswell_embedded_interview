@@ -9,44 +9,44 @@
 
 ## Phase 0 — 環境確認
 
-- [ ] `docker compose up -d --build`（首次約 10 分鐘）
-- [ ] 建立 venv 並 `pip install -r requirements.txt`
-- [ ] `python starter/telemetry.py` 在 ~20 s 內看到遙測
-- [ ] 【選做】QGroundControl 連 `tcp:127.0.0.1:5762` 觀察
+- [x] `docker compose up -d --build`（首次約 10 分鐘）
+- [x] 建立 venv 並 `pip install -r requirements.txt`
+- [x] `python starter/telemetry.py` 在 ~20 s 內看到遙測
+- [x] 【選做】QGroundControl 連 `tcp:127.0.0.1:5762` 觀察
 
 ## Phase 1 — Part 1 跑通（`part1_takeoff.py`）
 
 > 只寫 Part 1 需要的最小底層，直接寫在 `starter/drone.py` 裡，不拆檔。
 
-- [ ] 新增 `starter/__init__.py`
-- [ ] `drone.py` 最小底層：
-  - [ ] 接收執行緒（唯一 `recv_match` 呼叫者）+ `TelemetrySnapshot`（lock 保護）
-  - [ ] HEARTBEAT 來源過濾（只認自駕儀）
-  - [ ] `send_lock` 保護所有送出
-  - [ ] `send_command_long()`：等對應 ACK、處理 IN_PROGRESS、拒絕時附上最近的 STATUSTEXT
-  - [ ] `wait_until(predicate, timeout, desc, abortable=False)`
-  - [ ] 接收執行緒在連線失效時要讓等待者得知（不可永久卡住）
-- [ ] `wait_ready_to_arm()`（EKF 旗標 + GPS fix，timeout 120 s，期間印狀態）
-- [ ] `set_mode("GUIDED")`（ACK + HEARTBEAT）
-- [ ] `arm()`（ACK + HEARTBEAT，被拒時在 timeout 內重試）
-- [ ] `takeoff(15)`（ACK，印高度，誤差 ≤0.5 m 時印 `REACHED`）
-- [ ] `main()` 統一錯誤處理、退出碼、日誌格式（見 [03_architecture.md](03_architecture.md) §5）
-- [ ] **SITL 實測**：正常路徑 exit 0
-- [ ] **SITL 實測**：SITL 未啟動 → 清楚錯誤 + exit 1（無 traceback）
-- [ ] **SITL 實測**：`docker compose restart` 後立即執行，確認程式會等待，而不是解鎖被拒後崩潰
-- [ ] git commit
+- [x] 新增 `starter/__init__.py`
+- [x] `drone.py` 最小底層：
+  - [x] 接收執行緒（唯一 `recv_match` 呼叫者）+ `TelemetrySnapshot`（lock 保護）
+  - [x] HEARTBEAT 來源過濾（只認自駕儀）
+  - [x] `send_lock` 保護所有送出
+  - [x] `send_command_long()`：等對應 ACK、處理 IN_PROGRESS、拒絕時附上最近的 STATUSTEXT
+  - [x] `wait_until(predicate, timeout, desc, abortable=False)`
+  - [x] 接收執行緒在連線失效時要讓等待者得知（不可永久卡住）
+- [x] `wait_ready_to_arm()`（EKF 旗標 + GPS fix，timeout 120 s，期間印狀態）
+- [x] `set_mode("GUIDED")`（ACK + HEARTBEAT）
+- [x] `arm()`（ACK + HEARTBEAT，被拒時在 timeout 內重試）
+- [x] `takeoff(15)`（ACK，印高度，誤差 ≤0.5 m 時印 `REACHED`）
+- [x] `main()` 統一錯誤處理、退出碼、日誌格式（見 [03_architecture.md](03_architecture.md) §5）
+- [x] **SITL 實測**：正常路徑 exit 0
+- [x] **SITL 實測**：SITL 未啟動 → 清楚錯誤 + exit 1（無 traceback）
+- [x] **SITL 實測**：`docker compose restart` 後立即執行，確認程式會等待，而不是解鎖被拒後崩潰
+- [x] git commit
 
 ## Phase 2 — Part 2 跑通（`part2_square.py`）
 
-- [ ] `starter/geo.py`：`offset_latlon`、`horizontal_distance_m`、`square_corners`
-- [ ] `tests/test_geo.py`（成本低，建議此時就寫）：80 m 偏移誤差 < 0.1 m、四邊長度 ≈ 80 m、距離對稱
-- [ ] `starter/mission.py`：把 Part 1 流程抽成 `takeoff_sequence(drone, 15)`
-- [ ] 以起飛後位置為 A 計算 A→B→C→D→A
-- [ ] `goto()`：在 `send_lock` 內檢查 `abort_event`（Part 3 需要，現在先寫好）
-- [ ] `fly_to()`：每 ~1 s 重送目標並印距離，≤ 2 m 視為抵達，每段有 timeout（`abortable=True`）
-- [ ] `set_mode("RTL")` + `wait_landed_disarmed()`（`abortable=False`）
-- [ ] **SITL 實測**：完整飛完並落地，exit 0
-- [ ] git commit
+- [x] `starter/geo.py`：`offset_latlon`、`horizontal_distance_m`、`square_corners`
+- [x] `tests/test_geo.py`（成本低，建議此時就寫）：80 m 偏移誤差 < 0.1 m、四邊長度 ≈ 80 m、距離對稱
+- [x] `starter/mission.py`：把 Part 1 流程抽成 `takeoff_sequence(drone, 15)`
+- [x] 以起飛後位置為 A 計算 A→B→C→D→A
+- [x] `goto()`：在 `send_lock` 內檢查 `abort_event`（Part 3 需要，現在先寫好）
+- [x] `fly_to()`：每 ~1 s 重送目標並印距離，≤ 2 m 視為抵達，每段有 timeout（`abortable=True`）
+- [x] `set_mode("RTL")` + `wait_landed_disarmed()`（`abortable=False`）
+- [x] **SITL 實測**：完整飛完並落地，exit 0
+- [x] git commit
 
 > ✅ 到這裡已經達成「兩題做好」。若時間緊迫，可以跳到 Phase 4 先寫 `NOTES.md`。
 
@@ -101,3 +101,6 @@
 |---|---|---|---|
 | 2026-10-04 | 規劃 AI | 建立 `docs/` 規格文件 | 尚未開始實作 |
 | 2026-10-04 | 規劃 AI | 依審查意見修訂 docs | 修正 listener 死鎖風險、中止和參數確認的競爭條件；改成先跑通再重構；統一日誌格式；把 I-1～I-3 列入 NOTES 必寫 |
+| 2026-10-04 | 開發者 | 完成 Phase 0 與 Phase 1 | 已完成 Part 1 的底層架構、起飛測試並更新了相關的確認機制。 |
+| 2026-10-04 | 開發者 | 完成 Phase 2 | 成功實作與測試 Part 2，飛行正方形並安全降落。 |
+| 2026-10-04 | 開發者 | 完成 Phase 2 | 成功實作與測試 Part 2，飛行正方形並安全降落。 |
