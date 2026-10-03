@@ -97,7 +97,8 @@ conn.mav.set_position_target_global_int_send(
 
 ## 5. 降落 / 上鎖判斷
 
-- `HEARTBEAT.base_mode & MAV_MODE_FLAG_SAFETY_ARMED == 0` → 已上鎖（主要依據）。
+- `HEARTBEAT.base_mode & MAV_MODE_FLAG_SAFETY_ARMED == 0` → 已上鎖；**單獨不足以證明已落地**。
+- 同時要求近期 `GLOBAL_POSITION_INT.relative_alt` 接近 0 m（目前容差 0.5 m）；RTL 返回 Home，故可用相對 Home 高度作落地佐證。
 - `EXTENDED_SYS_STATE.landed_state == MAV_LANDED_STATE_ON_GROUND`(1)（輔助；可能需要用 `SET_MESSAGE_INTERVAL` 請求）。
 - RTL 流程：爬升至 `RTL_ALT`（預設 15 m）→ 飛回 Home → 降落 → 自動上鎖。從正方形中途返航約 30–90 s。
 
@@ -116,7 +117,7 @@ conn.mav.param_set_send(
 
 ## 7. 電池（Part 3）
 
-- `SYS_STATUS.voltage_battery`：**mV**（uint16）；`65535` = 未知 → 忽略。
+- `SYS_STATUS.voltage_battery`：**mV**（uint16）；`65535` = 未知 → 忽略。任務開始後的 `0` 也低於 11.0 V，須觸發中止；開機初期短暫的 `0` 透過「僅在任務期間啟動監控」處理。
 - 也可參考 `BATTERY_STATUS.voltages[0]`（mV），但題目指定 `SYS_STATUS`。
 - SITL 預設 `SIM_BATT_VOLTAGE` = 12.6 V；設 10.5 後下一筆 `SYS_STATUS`（約 4 Hz 時 ≤ 0.25 s）就會反映。
 - 可考慮簡單去抖動（例如連續 2 筆 < 11.0 V），但題目要求「立即」，若加去抖動請在 NOTES.md 說明取捨。

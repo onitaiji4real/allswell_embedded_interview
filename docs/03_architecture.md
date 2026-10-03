@@ -47,12 +47,13 @@ flowchart LR
 ```
 
 - **接收執行緒**：唯一呼叫 `conn.recv_match(blocking=True, timeout=0.5)` 的地方。每收到一筆訊息：
+  - 先檢查來源 system/component；非目標自駕儀封包直接忽略，不能更新狀態、滿足 ACK 等待或進入安全 listener。
   - 更新 `Telemetry` 快照（mode、armed、lat/lon/rel_alt、voltage、ekf_flags、gps_fix、landed_state、last_heartbeat_time）。
   - `COMMAND_ACK`、`PARAM_VALUE`、`STATUSTEXT` 推入對應的佇列/通知等待中的呼叫者。
   - 呼叫已註冊的監聽器（listener），例如電池監控器。
 - **送出**：所有 `conn.mav.*_send()` 用一把 `send_lock` 保護。
 - **任務邏輯**（主執行緒）：讀快照、等條件（`wait_until(predicate, timeout)`），每次迴圈檢查 `abort_event`；一旦被設置，**立即停止送 goto** 並拋出 `MissionAborted`。
-- **安全監控器**：電壓 < 11.0 V 時：記錄時間戳 + 原因 → `abort_event.set()` → 送出 RTL（**只送不等**）。主執行緒接手確認 RTL 並等待落地。
+- **安全監控器**：電壓 < 11.0 V 時，呼叫 `abort_and_request_mode_nowait("RTL")`，在送出鎖內設置中止旗標並送出 RTL（**只送不等**），再記錄時間戳與原因。主執行緒接手確認 RTL 並等待落地。
 - **GCS 心跳**（選做）：另一個小執行緒每 1 秒送一次 `HEARTBEAT`（`MAV_TYPE_GCS`），模擬真實地面站行為。
 
 ### ⚠️ 規則 A：listener 內只能做「不會卡住」的事（避免死鎖）
@@ -62,10 +63,10 @@ listener 是在**接收執行緒**中被呼叫的，而接收執行緒正是負�
 | listener 內 ✅ 允許 | listener 內 ❌ 禁止 |
 |---|---|
 | 寫 log | `send_command_long()`（等 ACK） |
-| `abort_event.set()` | `set_mode()` / `set_param()` / `wait_until()` |
+| `abort_and_request_mode_nowait("RTL")` | `set_mode()` / `set_param()` / `wait_until()` |
 | 只送不等的 `command_long_send(DO_SET_MODE, RTL)`（取得 `send_lock` 後直接送） | 任何 `time.sleep()` 或阻塞 I/O |
 
-建議 `Drone` 提供一個明確的只送不等方法，例如 `request_mode_nowait("RTL")`，讓 listener 只能呼叫它。
+`Drone` 提供 `abort_and_request_mode_nowait("RTL")` 給安全 listener 使用；它只送不等，並把中止旗標與 RTL 指令排在同一把送出鎖下。
 
 **RTL 的確認一律交給主執行緒**：主執行緒捕捉 `MissionAborted` 後：
 1. 若 `HEARTBEAT` 已顯示 RTL（或自駕儀自身 failsafe 切到 LAND）→ 視為已確認並記錄。
@@ -78,7 +79,7 @@ listener 是在**接收執行緒**中被呼叫的，而接收執行緒正是負�
    - 任務階段（`fly_to`、正方形航程）：`abortable=True`，中止時拋 `MissionAborted`。
    - 中止後的收尾（`set_mode("RTL")`、`wait_landed_disarmed()`）以及 `set_param()`：`abortable=False`，否則收尾本身會被自己的中止打斷。
 2. **`set_param()` 不受 `abort_event` 影響**：故障注入後電壓會立刻下降，監控器很可能在 `PARAM_VALUE` 回來前就觸發中止。`set_param()` 必須**照常完成確認並記錄**「參數已確認」那一行（原題明確要求確認）。若故障注入是在背景執行緒（例如 `threading.Timer`）執行，主執行緒結束前要 `join()` 它，確保確認結果有寫進日誌；若確認失敗，即使中止與返航成功，也應以非零結束並寫明原因。
-3. **中止後一筆 goto 都不能再送**：`goto()` 必須在 `send_lock` **內**再檢查一次 `abort_event`：
+3. **中止後一筆 goto 都不能再送**：`goto()` 必須在 `send_lock` **內**再檢查一次 `abort_event`；監控器也必須在**同一把鎖內**設置旗標：
 
 ```python
 def goto(self, lat, lon, alt_m):
@@ -88,10 +89,10 @@ def goto(self, lat, lon, alt_m):
         self.conn.mav.set_position_target_global_int_send(...)
 ```
 
-監控器端則是「先 `abort_event.set()`，再取得 `send_lock` 送 RTL」。兩邊共用同一把鎖，因此 RTL 之後不可能再出現任何 goto。
+監控器端以 `abort_and_request_mode_nowait()` 取得 `send_lock`，然後設置旗標及送 RTL。若 goto 已取得鎖，它會在旗標設置前完成；若監控器先取得鎖，後續 goto 會被拒絕。**不能在鎖外先設旗標**，否則正在送出的 goto 仍可能在旗標設置後才真正送出。
 
 ### 為什麼選這個（可寫進 NOTES.md）
-- 單一讀取者 → 沒有訊息被搶走的競爭問題；ACK 一定送達等待者。
+- 單一讀取者 → ACK 不會被另一個讀取執行緒搶走；封包仍可能遺失，因此等待者保留 timeout 與重試。
 - 安全監控在**每筆**遙測到達時立即評估，不受任務邏輯阻塞影響（例如任務正在等某個 ACK 時，監控器仍可運作）。
 - 比 asyncio 簡單：`pymavlink` 是阻塞式 API，硬套 asyncio 需要 `run_in_executor`。
 - Part 1/2 也用同一套 `Drone` 類別，Part 3 只是多註冊一個監聽器 → 程式碼重用最大化。
@@ -122,7 +123,9 @@ class Drone:
         # 輪詢快照直到 predicate 為真；逾時 raise DroneError(desc)
         # abortable=True 時，abort_event 被設置就 raise MissionAborted（見規則 B）
     def request_mode_nowait(self, mode_name) -> None
-        # 只送 DO_SET_MODE、不等 ACK；listener 唯一可用的指令方法（見規則 A）
+        # 只送 DO_SET_MODE、不等 ACK；供 Ctrl+C 緊急返航使用
+    def abort_and_request_mode_nowait(self, mode_name="RTL") -> bool
+        # listener 使用；在 send_lock 內設置 abort_event 並送模式切換指令
 
     # --- 高階 ---
     def wait_ready_to_arm(self, timeout=120.0) -> None
@@ -132,7 +135,7 @@ class Drone:
     def goto(self, lat, lon, alt_m) -> None          # 送一次位置目標（無阻塞）；在 send_lock 內檢查 abort_event
     def fly_to(self, lat, lon, alt_m, radius_m=2.0, timeout=90.0, on_progress=None) -> None
         # 迴圈：每 ~1 s 重送 goto + 回報距離，直到水平距離 ≤ radius_m（abortable=True）
-    def wait_landed_disarmed(self, timeout=180.0) -> None   # abortable=False
+    def wait_landed_disarmed(self, timeout=180.0) -> None   # 上鎖 + 近期近地高度；abortable=False
     def set_param(self, name, value, timeout=5.0, retries=3) -> float   # 不受 abort_event 影響
 
     # --- 狀態 ---
