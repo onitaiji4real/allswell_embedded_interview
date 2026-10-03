@@ -77,7 +77,7 @@
   - [x] 意外發現（挑 1–2 項，例如 ACK 和實際狀態不同步、auto-disarm、自駕儀自身電池 failsafe）
 - [x] 根目錄 `README.md` 不修改（或只在最底部加「如何執行」段落）
 - [x] `pytest` 全部通過
-- [ ] 清楚的 git commit 歷史
+- [x] 清楚的 git commit 歷史
 
 ## Phase 5 — 品質強化（全部【選做】，依價值排序）
 
