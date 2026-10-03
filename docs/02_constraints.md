@@ -21,8 +21,8 @@
 
 ## 3. 失敗處理
 
-- 指令被拒（`COMMAND_ACK.result != MAV_RESULT_ACCEPTED`）→ 錯誤。
-- 注意 `MAV_RESULT_IN_PROGRESS`（5）不是失敗，應繼續等待最終結果。
+- 指令被拒（`COMMAND_ACK.result` 既非 `MAV_RESULT_ACCEPTED` 也非 `MAV_RESULT_IN_PROGRESS`）→ 錯誤。
+- `MAV_RESULT_IN_PROGRESS`（5）表示尚未完成，應繼續等待最終結果。
 - 任何錯誤：印出清楚訊息 + **非零 exit code**，**不可**出現未捕捉的 traceback，**不可**卡住。
 - 腳本入口建議統一模式：
 
@@ -51,13 +51,15 @@ if __name__ == "__main__":
 | 起飛 | `COMMAND_ACK`（cmd 22） | `GLOBAL_POSITION_INT.relative_alt` 上升並到達 |
 | 前往角點 | （`SET_POSITION_TARGET_GLOBAL_INT` 無 ACK） | `GLOBAL_POSITION_INT` 水平距離 ≤ 2 m；可輔以 `POSITION_TARGET_GLOBAL_INT` 回報確認目標已被接受 |
 | 設參數 | `PARAM_VALUE` 回應 | 回應值 ≈ 設定值 |
-| 降落 | — | `HEARTBEAT` 已上鎖（+ `EXTENDED_SYS_STATE`） |
+| 降落 | — | `HEARTBEAT` 已上鎖，且近期 `GLOBAL_POSITION_INT.relative_alt` 接近 0 m |
 
 ## 5. 單一 MAVLink 連線
 
 - Part 3 的任務邏輯與安全監控**必須共用同一條連線**（不可開第二條連線給監控器用）。
 - `pymavlink` 的連線物件**不是執行緒安全**的：不可讓多個執行緒同時呼叫 `recv_match()`。架構方案見 [03_architecture.md](03_architecture.md)。
 - 在接收執行緒中被呼叫的 listener **絕不可等待任何回應**（ACK、PARAM_VALUE、遙測條件），否則會死鎖。詳見 [03_architecture.md](03_architecture.md) §2 規則 A。
+- 接收執行緒須在更新快照、分派 ACK/參數回覆、呼叫安全 listener **之前**檢查來源 system/component 是否為目標自駕儀。外來封包不能觸發低電壓中止，也不能確認指令。
+- 安全中止旗標須在與 `goto()` 相同的送出鎖內設置，讓「停止導航」與「送出導航封包」有明確的先後順序。
 
 ## 6. 環境
 
